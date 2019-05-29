@@ -89,6 +89,7 @@ void config_free(CONFIG **pconf) {
 		FREE(conf->epg_conf);
 		FREE(conf->network_name);
 		FREE(conf->provider_name);
+		FREE(conf->output_filename);
 		FREE(*pconf);
 	}
 }
@@ -413,6 +414,7 @@ static void show_usage(void) {
 	puts("Server settings:");
 	puts("\t-b addr\t\tLocal IP address to bind.   (default: 0.0.0.0)");
 	puts("\t-p port\t\tPort to listen.             (default: 0)");
+	puts("\t-N disable network");
 	puts("\t-d pidfile\tDaemonize with pidfile");
 	puts("\t-l host\t\tSyslog host                 (default: disabled)");
 	puts("\t-L port\t\tSyslog port                 (default: 514)");
@@ -441,6 +443,7 @@ static void show_usage(void) {
 	puts("\t-D\t\tDebug");
 	puts("");
 	puts("\t-W\t\tWrite output file");
+	puts("\t-f\t\tThe output filename           (default: mptsd-output.ts)");
 	puts("\t-E\t\tWrite input file");
 	puts("");
 }
@@ -454,8 +457,9 @@ void config_load(CONFIG *conf, int argc, char **argv) {
 	conf->logport = 514;
 	conf->server_port = 0;
 	conf->server_socket = -1;
+	conf->write_output_network = 1;
 
-	while ((j = getopt(argc, argv, "i:b:p:g:c:n:e:d:t:o:O:P:l:L:B:m:qDHhWE")) != -1) {
+	while ((j = getopt(argc, argv, "i:b:p:g:c:n:e:d:t:o:O:P:l:L:B:m:f:qDHhWEN")) != -1) {
 		switch (j) {
 			case 'i':
 				conf->ident = strdup(optarg);
@@ -530,9 +534,14 @@ void config_load(CONFIG *conf, int argc, char **argv) {
 					exit(1);
 				}
 				break;
+			case 'N':
+				conf->write_output_network = 0;
+				break;
 			case 'W':
 				conf->write_output_file = 1;
-				output_open_file(conf->output);
+				break;
+			case 'f':
+				conf->output_filename = strdup(optarg);
 				break;
 			case 'E':
 				conf->write_input_file = 1;
@@ -550,7 +559,7 @@ void config_load(CONFIG *conf, int argc, char **argv) {
 				break;
 		}
 	}
-	if (!conf->output->out_host.s_addr) {
+	if (conf->write_output_network && !conf->output->out_host.s_addr) {
 		fprintf(stderr, "ERROR: Output address is not set (use -O x.x.x.x)\n");
 		show_usage();
 		goto ERR;
@@ -572,12 +581,20 @@ void config_load(CONFIG *conf, int argc, char **argv) {
 	if (!conf->epg_conf) {
 		conf->epg_conf = strdup("mptsd_epg.conf");
 	}
+	if (!conf->output_filename) {
+		conf->output_filename = strdup("mptsd-output.ts");
+	}
 
 	// Align bitrate to 1 packet (1316 bytes)
 	conf->output_bitrate        *= 1000000; // In bytes
 	conf->output_packets_per_sec = ceil(conf->output_bitrate / (1316 * 8));
 	conf->output_bitrate         = conf->output_packets_per_sec * (1316 * 8);
 	conf->output_tmout           = 1000000 / conf->output_packets_per_sec;
+
+	// Open the filename if we want to write to a file
+	if(conf->write_output_file) {
+		output_open_file(conf->output_filename, conf->output);
+	}
 
 	if (conf->server_port)
 		init_server_socket(conf->server_addr, conf->server_port, &conf->server, &conf->server_socket);
